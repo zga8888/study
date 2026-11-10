@@ -1,0 +1,119 @@
+name: Build
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint and syntax
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Ruff
+        run: python -m pip install --upgrade ruff
+
+      - name: Check Python syntax
+        run: python -m py_compile yt_dlp_gui.py
+
+      - name: Run Ruff
+        run: ruff check yt_dlp_gui.py
+
+  linux:
+    name: Linux x86_64
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Tk
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk
+
+      - name: Install PyInstaller
+        run: python3 -m pip install --user --upgrade pyinstaller
+
+      - name: Build onedir app
+        run: |
+          python3 -m PyInstaller \
+            --noconfirm \
+            --clean \
+            --onedir \
+            --windowed \
+            --name CapybaraDownloader \
+            --add-data "assets:assets" \
+            yt_dlp_gui.py
+
+      - name: Package
+        run: |
+          mkdir -p release/CapybaraDownloader-linux-x86_64
+          cp -a dist/CapybaraDownloader release/CapybaraDownloader-linux-x86_64/
+          cp README.md packaging/install_linux.sh release/CapybaraDownloader-linux-x86_64/
+          tar -czf CapybaraDownloader-linux-x86_64.tar.gz -C release CapybaraDownloader-linux-x86_64
+          sha256sum CapybaraDownloader-linux-x86_64.tar.gz > CapybaraDownloader-linux-x86_64.tar.gz.sha256
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            CapybaraDownloader-linux-x86_64.tar.gz
+            CapybaraDownloader-linux-x86_64.tar.gz.sha256
+          if-no-files-found: error
+
+  windows:
+    name: Windows x64
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PyInstaller
+        run: python -m pip install --upgrade pyinstaller
+
+      - name: Build onedir app
+        run: |
+          python -m PyInstaller `
+            --noconfirm `
+            --clean `
+            --onedir `
+            --windowed `
+            --name CapybaraDownloader `
+            --icon "assets/capybara.ico" `
+            --add-data "assets;assets" `
+            yt_dlp_gui.py
+
+      - name: Package
+        run: |
+          Copy-Item README.md dist/CapybaraDownloader/README.md
+          Copy-Item windows/README-Windows.md dist/CapybaraDownloader/README-Windows.md
+          Compress-Archive -Path dist/CapybaraDownloader -DestinationPath CapybaraDownloader-windows-x64.zip
+          $hash = (Get-FileHash CapybaraDownloader-windows-x64.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  CapybaraDownloader-windows-x64.zip" | Out-File -Encoding ascii CapybaraDownloader-windows-x64.zip.sha256
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            CapybaraDownloader-windows-x64.zip
+            CapybaraDownloader-windows-x64.zip.sha256
+          if-no-files-found: error

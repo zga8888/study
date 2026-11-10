@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+
+# PyInstaller
+build/
+dist/
+*.spec
+.build-deps/
+capybara-app/
+capybara-downloader
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Downloads / temp
+*.part
+*.ytdl
+*.log
+
+# Local GitHub CLI helper
+.tools/
+
+# Tool caches
+.ruff_cache/
+.pytest_cache/
+
+# Release build outputs
+release/
+*.tar.gz
+*.zip
