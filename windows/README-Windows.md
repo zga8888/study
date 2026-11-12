@@ -35,6 +35,26 @@ winget install --id yt-dlp.yt-dlp -e --source winget
 winget install --id Gyan.FFmpeg -e --source winget
 ```
 
+### YouTube 需要代理
+
+程序会自动读取 Windows 的“Internet 选项”系统代理。使用 Clash / v2rayN 时，请开启“系统代理”模式。
+
+如果自动检测失败，可以编辑：
+
+```text
+%APPDATA%\yt-dlp-gui\settings.json
+```
+
+设置：
+
+```json
+{
+  "proxy": "http://127.0.0.1:7897"
+}
+```
+
+B 站通常可以直连，YouTube 在国内网络下通常必须走代理。
+
 安装完成后 **关闭并重新打开终端**，然后确认：
 
 ```powershell

@@ -18,6 +18,7 @@ import re
 import shlex
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -223,6 +224,164 @@ def external_env() -> dict[str, str]:
     return env
 
 
+def normalise_proxy(value: str | None) -> str | None:
+    if not value:
+        return None
+    proxy = value.strip().strip("\"'")
+    if not proxy:
+        return None
+    if "://" not in proxy:
+        proxy = "http://" + proxy
+    parsed = urlparse(proxy)
+    if not parsed.hostname:
+        return None
+    return proxy
+
+
+def proxy_reachable(proxy: str) -> bool:
+    parsed = urlparse(proxy if "://" in proxy else "http://" + proxy)
+    host = parsed.hostname
+    if not host:
+        return False
+    if parsed.port:
+        port = parsed.port
+    elif parsed.scheme.startswith("socks"):
+        port = 1080
+    elif parsed.scheme == "https":
+        port = 443
+    else:
+        port = 80
+    try:
+        with socket.create_connection((host, port), timeout=0.7):
+            return True
+    except OSError:
+        return False
+
+
+def _gsettings_value(schema: str, key: str) -> str | None:
+    if not shutil.which("gsettings"):
+        return None
+    try:
+        result = subprocess.run(
+            ["gsettings", "get", schema, key],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+            env=external_env(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    value = result.stdout.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        value = value[1:-1]
+    return value or None
+
+
+def linux_system_proxy() -> str | None:
+    if _gsettings_value("org.gnome.system.proxy", "mode") != "manual":
+        return None
+    for scheme in ("https", "http"):
+        host = _gsettings_value(f"org.gnome.system.proxy.{scheme}", "host")
+        port = _gsettings_value(f"org.gnome.system.proxy.{scheme}", "port")
+        if host:
+            return f"http://{host}:{port or 80}"
+    return None
+
+
+def windows_system_proxy() -> str | None:
+    try:
+        import winreg
+    except ImportError:
+        return None
+    try:
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Internet Settings",
+        )
+        try:
+            enabled = winreg.QueryValueEx(key, "ProxyEnable")[0]
+            server = winreg.QueryValueEx(key, "ProxyServer")[0]
+        finally:
+            winreg.CloseKey(key)
+    except OSError:
+        return None
+    if not enabled or not server:
+        return None
+    if "=" in server:
+        values = {}
+        for part in server.split(";"):
+            if "=" in part:
+                name, value = part.split("=", 1)
+                values[name.strip().lower()] = value.strip()
+        server = values.get("https") or values.get("http") or values.get("socks") or ""
+    return normalise_proxy(server)
+
+
+def macos_system_proxy() -> str | None:
+    try:
+        result = subprocess.run(
+            ["scutil", "--proxy"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    text = result.stdout
+    for scheme in ("HTTPS", "HTTP"):
+        enabled = f"{scheme}Enable : 1"
+        if enabled not in text:
+            continue
+        host = ""
+        port = ""
+        for line in text.splitlines():
+            if line.strip().startswith(f"{scheme}Proxy :"):
+                host = line.split(":", 1)[1].strip()
+            elif line.strip().startswith(f"{scheme}Port :"):
+                port = line.split(":", 1)[1].strip()
+        if host:
+            return f"http://{host}:{port or 80}"
+    return None
+
+
+def system_proxy() -> str | None:
+    if os.name == "nt":
+        return windows_system_proxy()
+    if sys.platform == "darwin":
+        return macos_system_proxy()
+    return linux_system_proxy()
+
+
+def resolve_proxy(setting: str) -> tuple[str | None, str]:
+    value = (setting or "auto").strip()
+    if value.lower() in {"none", "off", "direct", "disabled"}:
+        return None, "已禁用"
+    if value.lower() != "auto":
+        proxy = normalise_proxy(value)
+        return proxy, "配置文件" if proxy else "配置无效"
+
+    for key in (
+        "HTTPS_PROXY",
+        "https_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+        "HTTP_PROXY",
+        "http_proxy",
+    ):
+        proxy = normalise_proxy(os.environ.get(key))
+        if proxy and proxy_reachable(proxy):
+            return proxy, f"环境变量 {key}"
+
+    proxy = system_proxy()
+    if proxy and proxy_reachable(proxy):
+        return proxy, "系统代理"
+    return None, "未检测到可用代理"
+
+
 def human_size(value: float | None) -> str:
     if value is None or value <= 0:
         return "--"
@@ -299,6 +458,10 @@ class DownloaderApp:
         self._settings = self._load_settings()
         self._video_choice = self._settings.get("video_quality", "1080p 全高清")
         self._audio_choice = self._settings.get("audio_quality", "192 kbps（推荐）")
+        proxy_setting = self._settings.get("proxy", "auto")
+        self._proxy_setting = (
+            proxy_setting.strip() if isinstance(proxy_setting, str) else "auto"
+        )
         if self._video_choice not in dict(VIDEO_QUALITIES):
             self._video_choice = "1080p 全高清"
         if self._audio_choice not in dict(AUDIO_QUALITIES):
@@ -942,6 +1105,7 @@ class DownloaderApp:
             "playlist": bool(self.playlist_var.get()),
             "subtitles": bool(self.subs_var.get()),
             "browser": self.browser_var.get(),
+            "proxy": self._proxy_setting,
         }
         try:
             SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -1177,6 +1341,7 @@ class DownloaderApp:
         playlist: bool,
         subtitles: bool,
         browser: str,
+        proxy: str | None = None,
     ) -> list[str]:
         command = [
             *self.ytdlp,
@@ -1211,6 +1376,8 @@ class DownloaderApp:
 
         if self.ffmpeg:
             command.extend(["--ffmpeg-location", str(Path(self.ffmpeg).parent)])
+        if proxy:
+            command.extend(["--proxy", proxy])
 
         if playlist:
             command.append("--yes-playlist")
@@ -1319,6 +1486,12 @@ class DownloaderApp:
             if not proceed:
                 return
 
+        proxy, proxy_source = resolve_proxy(self._proxy_setting)
+        if proxy:
+            self._append_log([f"网络代理：{proxy}（{proxy_source}）"])
+        elif proxy_source not in {"未检测到可用代理", "已禁用"}:
+            self._append_log([f"网络代理：未使用（{proxy_source}）"])
+
         cmd = self._build_command(
             url=url,
             directory=directory,
@@ -1327,6 +1500,7 @@ class DownloaderApp:
             playlist=bool(self.playlist_var.get()),
             subtitles=bool(self.subs_var.get()) and self.mode_var.get() == "video",
             browser=self.browser_var.get(),
+            proxy=proxy,
         )
 
         self._save_settings()

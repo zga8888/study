@@ -35,6 +35,7 @@
 - 可选嵌入中英文字幕
 - 可选从 Chrome / Chromium / Firefox / Edge / Brave 读取 Cookie
 - 自动记住保存目录、画质和选项
+- 自动检测系统代理（YouTube 必需）
 - 运行日志可复制，方便排查错误
 - 卡皮巴拉图标与桌面快捷方式
 
@@ -129,6 +130,39 @@ windows\run_source.bat
 3. 重新开始下载。
 
 如果浏览器正在运行导致读取 Cookie 失败，先完全退出浏览器再试。
+
+### YouTube 需要代理
+
+在国内网络环境下，B 站可以直连，但 YouTube 通常必须走代理。
+
+程序会自动读取：
+
+- 环境变量 `HTTPS_PROXY` / `HTTP_PROXY`
+- Linux 的 Cinnamon/GNOME 系统代理设置
+- Windows 的“Internet 选项”系统代理
+
+如果终端里的 `yt-dlp` 能下载 YouTube，而桌面启动的 GUI 不能，通常是因为终端有代理环境变量，而桌面进程没有继承。现在程序会直接读取系统代理，不再依赖终端环境。
+
+自动检测失败时，可以编辑设置文件：
+
+- Linux：`~/.config/yt-dlp-gui/settings.json`
+- Windows：`%APPDATA%\yt-dlp-gui\settings.json`
+
+例如：
+
+```json
+{
+  "proxy": "http://127.0.0.1:7897"
+}
+```
+
+设为空字符串可强制直连：
+
+```json
+{
+  "proxy": ""
+}
+```
 
 ### 播放列表
 
