@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here.
 
+## [1.0.2] - 2026-11-12
+
+### Fixed
+
+- Allow disabling automatic proxy detection with an empty `proxy` setting or `"none"`
+
 ## [1.0.1] - 2026-11-12
 
 ### Fixed

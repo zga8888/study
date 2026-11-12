@@ -356,9 +356,9 @@ def system_proxy() -> str | None:
     return linux_system_proxy()
 
 
-def resolve_proxy(setting: str) -> tuple[str | None, str]:
-    value = (setting or "auto").strip()
-    if value.lower() in {"none", "off", "direct", "disabled"}:
+def resolve_proxy(setting: str | None) -> tuple[str | None, str]:
+    value = "auto" if setting is None else str(setting).strip()
+    if value.lower() in {"", "none", "off", "direct", "disabled"}:
         return None, "已禁用"
     if value.lower() != "auto":
         proxy = normalise_proxy(value)
